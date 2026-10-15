@@ -1,19 +1,22 @@
 """工作流 LLM 调用辅助模块。
 
-基于项目 LLM 集成配置（config/agent_llm_config.json）与环境的模型基址，
-为简历筛选工作流的各节点提供统一的模型调用与 JSON 解析能力。
-与 Agent 使用同一可用通道（ChatOpenAI + COZE_INTEGRATION_MODEL_BASE_URL）。
+基于项目 LLM 配置（config/agent_llm_config.json）与本地环境变量，
+为投递工作流的各节点提供统一的模型调用与 JSON 解析能力。
+与 Agent 使用同一通道（ChatOpenAI，智谱 GLM / 任意 OpenAI 兼容，
+见 ZHIPU_API_KEY / ZHIPU_BASE_URL）。
 """
 import json
 import os
 import re
 
 from langchain_openai import ChatOpenAI
-from coze_coding_utils.runtime_ctx.context import default_headers, new_context
-from coze_coding_utils.log.write_log import request_context
 
-WORKSPACE_PATH = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-_LLM_CONFIG_PATH = os.path.join(WORKSPACE_PATH, "config", "agent_llm_config.json")
+# 配置目录：相对项目根（src/.. 的上一级/config）
+_CONFIG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "config"))
+_LLM_CONFIG_PATH = os.path.join(_CONFIG_DIR, "agent_llm_config.json")
+
+# 智谱 OpenAI 兼容基址（默认）；也可通过 ZHIPU_BASE_URL / OPENAI_BASE_URL 覆盖
+DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 
 
 def _get_text(content) -> str:
@@ -33,29 +36,34 @@ def _get_text(content) -> str:
 
 
 def _get_llm() -> ChatOpenAI:
-    """依据项目配置构建与 Agent 一致的 ChatOpenAI 实例。"""
+    """依据项目配置构建 ChatOpenAI 实例（智谱 GLM / 任意 OpenAI 兼容）。"""
     try:
         with open(_LLM_CONFIG_PATH, "r", encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception:
         cfg = {}
 
-    model = cfg.get("config", {}).get("model", "doubao-seed-2-0-pro-260215")
-    api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
-    base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
-    ctx = request_context.get() or new_context(method="resume_screening_workflow")
+    model = cfg.get("config", {}).get("model", "glm-4-flash")
+    api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("OPENAI_API_KEY")
+    base_url = (
+        os.getenv("ZHIPU_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or DEFAULT_BASE_URL
+    )
+    thinking = cfg.get("config", {}).get("thinking", "disabled")
 
-    return ChatOpenAI(
+    kwargs: dict = dict(
         model=model,
         api_key=api_key,
         base_url=base_url,
         temperature=cfg.get("config", {}).get("temperature", 0.3),
         timeout=cfg.get("config", {}).get("timeout", 600),
-        extra_body={
-            "thinking": {"type": cfg.get("config", {}).get("thinking", "disabled")}
-        },
-        default_headers=default_headers(ctx) if ctx else {},
     )
+    # 仅当显式开启 thinking 时附加（智谱 GLM 等默认不支持，避免报错）
+    if thinking and thinking != "disabled":
+        kwargs["extra_body"] = {"thinking": {"type": thinking}}
+
+    return ChatOpenAI(**kwargs)
 
 
 def call_llm(system_prompt: str, user_prompt: str, *, temperature: float = 0.3) -> str:

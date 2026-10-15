@@ -15,14 +15,18 @@ from langgraph.graph import MessagesState
 from langgraph.graph.message import add_messages
 from langchain_core.messages import AnyMessage
 
-from coze_coding_utils.runtime_ctx.context import default_headers
 from storage.memory.memory_saver import get_memory_saver
 
 from tools.resume_parser import parse_resume_file
 from tools.job_search import find_matching_jobs
 from tools.delivery import list_my_applications, update_application_status
 
-LLM_CONFIG = "config/agent_llm_config.json"
+# 配置目录：相对项目根（src/.. 的上一级/config）
+_CONFIG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "config"))
+LLM_CONFIG = os.path.join(_CONFIG_DIR, "agent_llm_config.json")
+
+# 智谱 OpenAI 兼容基址（默认）；也可通过 ZHIPU_BASE_URL / OPENAI_BASE_URL 覆盖
+DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 
 # 默认保留最近 30 轮对话 (60 条消息)，便于多份简历批量筛选
 MAX_MESSAGES = 60
@@ -47,31 +51,31 @@ def register_agent_tools():
     ]
 
 
-def build_agent(ctx=None):
-    """构建并返回简历筛选 Agent 实例。"""
-    workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-    config_path = os.path.join(workspace_path, LLM_CONFIG)
-
-    with open(config_path, "r", encoding="utf-8") as f:
+def build_agent():
+    """构建并返回求职投递 Agent 实例（智谱 GLM / 任意 OpenAI 兼容）。"""
+    with open(LLM_CONFIG, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
-    base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+    api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("OPENAI_API_KEY")
+    base_url = (
+        os.getenv("ZHIPU_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or DEFAULT_BASE_URL
+    )
+    thinking = cfg["config"].get("thinking", "disabled")
 
-    llm = ChatOpenAI(
-        model=cfg["config"].get("model"),
+    kwargs: dict = dict(
+        model=cfg["config"].get("model", "glm-4-flash"),
         api_key=api_key,
         base_url=base_url,
         temperature=cfg["config"].get("temperature", 0.7),
         streaming=True,
         timeout=cfg["config"].get("timeout", 600),
-        extra_body={
-            "thinking": {
-                "type": cfg["config"].get("thinking", "disabled")
-            }
-        },
-        default_headers=default_headers(ctx) if ctx else {},
     )
+    if thinking and thinking != "disabled":
+        kwargs["extra_body"] = {"thinking": {"type": thinking}}
+
+    llm = ChatOpenAI(**kwargs)
 
     return create_agent(
         model=llm,

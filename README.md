@@ -2,7 +2,7 @@
 
 求职者视角的 AI 求职助手。上传一份简历 + 求职偏好，自动在招聘平台检索匹配岗位、基于「简历 vs 岗位 JD」翻转评分匹配度、生成定制打招呼语，并把「待投递」清单落库，最终由求职者人工在环完成实际投递与状态追踪。
 
-> 本项目由 Coze Vibe Coding 模板改造而来：原模板是「HR 简历筛选」视角，本仓库将其翻转为「求职者投递」视角，并补齐岗位发现、匹配、投递执行、状态追踪等模块。
+> 本项目由 Coze Vibe Coding 模板改造而来，已**完全去除 Coze 依赖**，可纯本地运行 / 自托管，不锁定任何云平台。
 
 ## 核心特性
 
@@ -12,7 +12,7 @@
 - **翻转评分**：简历画像 vs 岗位 JD → 匹配度 0-100 + 推荐/不推荐 + 匹配点/差距点。
 - **定制招呼语**：针对每个推荐岗位生成自然的打招呼语草稿（人工在环使用）。
 - **投递状态追踪**：推荐岗位落库为「待投递」记录，支持回写 已读 / 已回 / 面试 / 拒信 / 已撤 等状态并统计。
-- **Coze 原生**：标准 Coze Vibe Coding 项目，同时支持「智能体（对话）」与「工作流（一次性流程）」两种入口。
+- **纯本地可运行**：标准 FastAPI + LangGraph，无平台锁定，LLM 走智谱 GLM-4-Flash（或任意 OpenAI 兼容），数据库默认本地 SQLite。
 
 ## 工作流
 
@@ -22,18 +22,18 @@
         → 状态追踪 → 输出报告（推荐清单 + 匹配分析 + 招呼语 + 投递状态）
 ```
 
-- **智能体模式**：对话式求职顾问，内部调用检索/匹配工具跑完整流程。
-- **工作流模式**：一次性流水线，输入简历文本 + 求职偏好，输出报告。
+- **Workflow 模式**（默认）：一次性流水线，输入简历文本 + 求职偏好，输出报告。
+- **Agent 模式**：对话式求职顾问（设置 `APP_MODE=agent`），内部调用检索/匹配工具跑完整流程。
 
 ## 目录结构
 
 ```
 src/
-  main.py                  # 服务入口（Coze 标准 /run /stream_run /v1/chat/completions 等契约）
+  main.py                  # 纯 FastAPI 服务入口（/run /stream_run /v1/chat/completions /health /graph_parameter）
   agents/agent.py          # 求职顾问 Agent（对话入口 + 工具注册）
   graphs/
     graph.py               # 求职者投递工作流（画像→发现→匹配→招呼语→投递→报告）
-    llm_client.py          # LLM JSON 调用封装
+    llm_client.py          # LLM 调用封装（ChatOpenAI，智谱/OpenAI 兼容）
   job_sources/             # 可插拔招聘数据源层（核心，不依赖具体平台）
     base.py                # JobPosting / SearchCriteria / BaseJobSource 抽象
     registry.py            # 注册表 + search_with_config（配置注入 + 未配置源自动跳过）
@@ -43,61 +43,87 @@ src/
     example_liepin.py      # 猎聘扩展模板（如何加新网站的示例）
     manual.py / mock.py    # 手动导入 / 示例数据源
   tools/
-    resume_parser.py       # 简历文件解析
+    resume_parser.py       # 简历文件解析（httpx 下载 + PDF/Word/TXT 本地解析）
     job_match.py           # 翻转评分
     greeting_drafter.py    # 招呼语生成
     job_search.py          # 检索 + 匹配一体化工具（Agent 用）
     delivery.py            # 投递清单 / 状态更新工具
   storage/database/
-    db.py                  # 同步 SQLAlchemy 连接
+    db.py                  # SQLAlchemy 连接（默认本地 SQLite，可选 PostgreSQL）
     models/delivery.py     # Application ORM + DeliveryStatus 枚举
     repo/delivery_repo.py  # 投递仓储层（落库 / 列表 / 改状态 / 统计 / 建表）
 config/
-  agent_llm_config.json    # 求职顾问提示词与模型配置
+  agent_llm_config.json    # LLM 模型与求职顾问提示词配置
   job_sources.json         # 数据源启用配置（enabled + per-source 参数）
 scripts/
+  run_local.sh             # 本地启动服务（设置 PYTHONPATH + 加载 .env）
   delivery_cli.py          # 投递记录管理 CLI（init/list/status/stats）
-  http_run.sh / local_run.sh / setup.sh / pack.sh   # Coze 运行与部署脚本
-tests/
-  test_boss_source.py      # BOSS 源单测（URL 构造 / 卡片解析 / 未配置跳过）
-  test_delivery_repo.py     # 投递仓储单测（内存 SQLite）
+requirements.txt          # 依赖清单（已去除 coze-*）
+.env.example              # 环境变量示例
 ```
 
-## 在 Coze 上运行
+## 本地运行
 
-1. 将代码关联进 Coze Vibe Coding（关联 Git 仓库联网导入，或 Web IDE 编辑）。
-2. 项目类型选择「智能体」或「工作流」——`is_agent_proj()` 据此选择入口，两套代码均已就绪。
-3. 环境变量：LLM 密钥与 `PGDATABASE_URL` 由 Coze 运行时自动注入；敏感项（如本地自托管要用 `BOSS_COOKIE`）在「项目环境变量」中声明，**不要写入代码**。
-4. 点击「运行 / 发布」→ Coze 自动执行 `setup.sh` + `http_run.sh` 起服务。
-   - 投递状态表随服务启动**自动建表**（幂等），无需手动 `init`。
-   - BOSS 源在无浏览器环境（默认未安装 Playwright）下**自动跳过、不报错**。
-
-HTTP 调用示例（工作流）：
-
-```
-POST /run
-{
-  "my_resume": "（粘贴简历文本）",
-  "job_preferences": {"keywords": ["前端", "AI"], "city": "深圳", "salary": "20-35K"},
-  "jobs_input": [],
-  "sources": ["mock"]
-}
-```
-
-## 本地验证（不依赖 Coze 库）
-
-完整服务依赖 Coze 运行时（`coze_coding_utils` 等仅在云端存在），本地只能运行不依赖 Coze 的部分：
+### 1. 安装依赖
 
 ```bash
-# 单测（需 sqlalchemy，建议 Python 3.12）
-python tests/test_boss_source.py
-python tests/test_delivery_repo.py
+# 方式 A（pip）
+pip install -r requirements.txt
 
-# 投递记录管理（需配置 PG 或本地 SQLite）
-python scripts/delivery_cli.py init    # 建表
-python scripts/delivery_cli.py list    # 查看待投递清单
-python scripts/delivery_cli.py status --id 3 --status delivered --note "已投"
-python scripts/delivery_cli.py stats   # 按状态统计
+# 方式 B（uv，会按 pyproject.toml 重新生成 lock）
+uv sync
+```
+
+### 2. 配置环境变量
+
+```bash
+cp .env.example .env
+# 编辑 .env，至少填写：
+#   ZHIPU_API_KEY=你的智谱API Key        # 智谱 GLM-4-Flash，OpenAI 兼容
+#   APP_MODE=workflow                    # 或 agent
+#   PGDATABASE_URL=                       # 留空即用本地 SQLite（./delivery.db）
+```
+
+### 3. 启动服务
+
+```bash
+# 推荐：一键脚本（自动设置 PYTHONPATH 与 .env）
+bash scripts/run_local.sh -p 5000
+# 或：APP_MODE=agent bash scripts/run_local.sh
+
+# 等价于：
+# PYTHONPATH=src python -m main -m http -p 5000
+```
+
+启动后投递状态表会**自动建表**（默认落到本地 `./delivery.db`），无需手动 init。
+
+### 4. 调用示例
+
+```bash
+# 一次性流水线（workflow）
+curl -s -X POST http://localhost:5000/run \
+  -H 'Content-Type: application/json' \
+  -d '{"my_resume":"（粘贴简历文本）","job_preferences":{"keywords":["前端","AI"],"city":"深圳","salary":"20-35K"},"sources":["mock"]}'
+
+# 健康检查
+curl -s http://localhost:5000/health
+
+# 查看输入输出 schema
+curl -s http://localhost:5000/graph_parameter
+```
+
+命令行直接跑一次流水线（无需起服务）：
+
+```bash
+PYTHONPATH=src python -m main -m flow -i '{"my_resume":"...","job_preferences":"前端 AI 深圳"}'
+```
+
+### 5. 投递记录管理
+
+```bash
+PYTHONPATH=src python scripts/delivery_cli.py list
+PYTHONPATH=src python scripts/delivery_cli.py status --id 3 --status delivered --note "已投"
+PYTHONPATH=src python scripts/delivery_cli.py stats
 ```
 
 ## 配置：config/job_sources.json
@@ -106,17 +132,12 @@ python scripts/delivery_cli.py stats   # 按状态统计
 {
   "enabled": ["mock", "manual"],
   "sources": {
-    "boss": {
-      "headless": true,
-      "max_jobs": 30,
-      "max_pages": 3,
-      "page_delay": 3.0
-    }
+    "boss": { "headless": true, "max_jobs": 30, "max_pages": 3, "page_delay": 3.0 }
   }
 }
 ```
 
-- `enabled`：启用的数据源名（云端建议 `["mock","manual"]`，本地装好 Playwright + Cookie 后加 `"boss"`）。
+- `enabled`：启用的数据源名（本地装好 Playwright + Cookie 后加 `"boss"`；云端/无浏览器环境会自动跳过）。
 - `sources.<name>`：per-source 运行参数（翻页限流、无头模式等）。
 
 ## 如何新增一个招聘网站（BOSS 不写死）
@@ -139,8 +160,9 @@ python scripts/delivery_cli.py stats   # 按状态统计
 - Phase 1 匹配引擎（简历画像 + 翻转评分 + 排名报告）：已完成
 - Phase 2 岗位发现（BOSS 自动检索 + 可插拔数据源层）：已完成
 - Phase 3 投递执行 + 状态追踪（人工在环 + 落库 + CLI）：已完成
+- 去 Coze 化（去除平台依赖，纯本地运行）：已完成
 - Phase 4 每日汇报复盘（基于状态统计自动汇总当日投递进展）：待做
 
 ## 技术栈
 
-FastAPI · LangGraph · SQLAlchemy 2.0 · Playwright（可选，浏览器类数据源）· Coze Vibe Coding 运行时
+FastAPI · LangGraph · SQLAlchemy 2.0 · httpx · Playwright（可选，浏览器类数据源）· 智谱 GLM-4-Flash（OpenAI 兼容）

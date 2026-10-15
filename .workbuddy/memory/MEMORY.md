@@ -31,10 +31,12 @@
 - Phase 3 已实现（人工在环）：投递状态数据模型 src/storage/database/models/delivery.py（Application ORM + DeliveryStatus 枚举 + 中文标签）；仓储层 repo/delivery_repo.py（persist_match_plan/list_applications/update_status/get_stats/create_delivery_tables，支持传入 session 便于 SQLite 单测）；graph 新增 delivery_node（匹配岗位→落库「待投递」记录，DB 不可用时降级内存清单）并接入边、报告增「四、投递清单（人工在环）」；tools/delivery.py（list_my_applications/update_application_status 工具）注册进 Agent；scripts/delivery_cli.py（init/list/status/stats）；单测 tests/test_delivery_repo.py 全绿（内存 SQLite）。
 - 待办（P4）：每日汇报复盘（基于 get_stats 统计 + BOSS 每日投递进展自动汇总）。
 
-## 运行与部署（Coze Vibe Coding）
+## 运行与部署（纯本地，已去 Coze）
 
-- 项目即 Coze Vibe Coding 工程：`.coze`(entrypoint=src/main.py, run=scripts/http_run.sh) 依赖 coze_coding_utils/cozeloop/coze_workload_identity，**本地无法跑完整服务**，须进扣子空间运行/部署。
-- 智能体 vs 工作流由 `graph_helper.is_agent_proj()` 决定（取扣子项目类型设置），仓库两套入口都在（agents/agent.py、graphs/graph.py）。
-- LLM 走 Coze 集成通道（COZE_WORKLOAD_IDENTITY_API_KEY / COZE_INTEGRATION_MODEL_BASE_URL 自动注入），模型见 config/agent_llm_config.json。
-- DB：`get_db_url()` 读 PGDATABASE_URL（Coze 注入）。投递表已在 main.py lifespan 幂等自动建（无需 manual init）。
-- BOSS 源云端优雅降级：未装 playwright 或未配 Cookie 时 is_configured=False，`search_with_config` 自动跳过，不报错（playwright 懒加载不拖崩启动）。云端建议 enabled 不含 boss 或依赖降级。
+- 已完全去除 Coze 依赖：删除 `.coze` 文件、scripts 下 Coze 部署脚本、pyproject 的 4 个 coze-* 依赖、src 内所有 `coze_coding_utils`/`cozeloop`/`coze_workload_identity` 引用（src 下已 grep 确认无残留 import）；删除未使用的 src/storage/s3（coze 存储封装）；uv.lock 已删（用 uv 需重 `uv lock`）。
+- 入口：`src/main.py` 纯 FastAPI+uvicorn，保留 `/run` `/stream_run` `/v1/chat/completions` `/health` `/graph_parameter`；去掉 `/async_run` `/cancel` `/task/{id}` 等 coze async_tasks 专属接口。本地启动：`bash scripts/run_local.sh`（设 PYTHONPATH=src + 加载 .env）；或 `PYTHONPATH=src python -m main -m http -p 5000`。
+- LLM：智谱 GLM-4-Flash（OpenAI 兼容），密钥读 `ZHIPU_API_KEY` / `ZHIPU_BASE_URL`（兼容 `OPENAI_*`），模型见 config/agent_llm_config.json 的 `model=glm-4-flash`。
+- DB：`get_db_url()` 优先读 `PGDATABASE_URL`，留空回退本地 SQLite（`./delivery.db`），零配置本地跑；投递表在 lifespan 幂等自动建。memory_saver 的 psycopg/postgres 依赖已懒加载，本地 SQLite 模式不引入 psycopg。
+- 模式：`APP_MODE=workflow`（默认，一次性流水线）/ `agent`（对话式求职顾问）。
+- BOSS 源优雅降级：未装 playwright 或未配 Cookie 时 `is_configured=False`，`search_with_config` 自动跳过，不报错（playwright 懒加载）。
+- 依赖：`requirements.txt`（已去 coze，含 httpx/pypdf/docx2python 等）；本地跑建议 `pip install -r requirements.txt`。

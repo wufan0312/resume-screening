@@ -1,12 +1,9 @@
-import psycopg
-from psycopg_pool import AsyncConnectionPool
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from typing import Optional, Union
 import logging
 import time
+from typing import Optional, Union, Any
+
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +16,8 @@ class MemoryManager:
     """Memory Manager 单例类"""
 
     _instance: Optional['MemoryManager'] = None
-    _checkpointer: Optional[Union[AsyncPostgresSaver, MemorySaver]] = None
-    _pool: Optional[AsyncConnectionPool] = None
+    _checkpointer: Optional[BaseCheckpointSaver] = None
+    _pool: Optional[Any] = None
     _setup_done: bool = False
 
     def __new__(cls):
@@ -28,8 +25,9 @@ class MemoryManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def _connect_with_retry(self, db_url: str) -> Optional[psycopg.Connection]:
+    def _connect_with_retry(self, db_url: str) -> Optional[Any]:
         """带重试的数据库连接，每次 15 秒超时，共尝试 2 次"""
+        import psycopg
         last_error = None
         for attempt in range(1, DB_MAX_RETRIES + 1):
             try:
@@ -49,6 +47,10 @@ class MemoryManager:
         """同步创建 schema 和表（只执行一次），返回是否成功"""
         if self._setup_done:
             return True
+
+        # 仅在真正使用 PostgreSQL 时延迟导入，避免本地 SQLite 模式强依赖 psycopg
+        import psycopg
+        from langgraph.checkpoint.postgres import PostgresSaver
 
         conn = self._connect_with_retry(db_url)
         if conn is None:
@@ -109,6 +111,9 @@ class MemoryManager:
 
         # 4. 尝试创建连接池和 checkpointer
         try:
+            from psycopg_pool import AsyncConnectionPool
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
             self._pool = AsyncConnectionPool(
                 conninfo=db_url,
                 timeout=DB_CONNECTION_TIMEOUT,

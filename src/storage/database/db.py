@@ -15,46 +15,34 @@ except Exception:
     pass
 
 def get_db_url() -> str:
-    """Build database URL from environment."""
-    url = os.getenv("PGDATABASE_URL") or ""
-    if url is not None and url != "":
+    """Build database URL from environment.
+
+    优先读 PGDATABASE_URL；为空时回退本地 SQLite（./delivery.db），
+    便于零配置本地运行（投递状态表直接落本地库，无需任何外部数据库）。
+    """
+    url = os.getenv("PGDATABASE_URL") or os.getenv("DELIVERY_DB_URL") or ""
+    if url and url.strip():
         return url
-    from coze_workload_identity import Client
-    try:
-        client = Client()
-        env_vars = client.get_project_env_vars()
-        client.close()
-        for env_var in env_vars:
-            if env_var.key == "PGDATABASE_URL":
-                url = env_var.value.replace("'", "'\\''")
-                return url
-    except Exception as e:
-        logger.error(f"Error loading PGDATABASE_URL: {e}")
-        raise e
-    finally:
-        if url is None or url == "":
-            logger.error("PGDATABASE_URL is not set")
-    return url
+    return "sqlite:///./delivery.db"
 _engine = None
 _SessionLocal = None
 
 def _create_engine_with_retry():
     url = get_db_url()
     if url is None or url == "":
-        logger.error("PGDATABASE_URL is not set")
-        raise ValueError("PGDATABASE_URL is not set")
-    size = 100
-    overflow = 100
-    recycle = 1800
-    timeout = 30
-    engine = create_engine(
-        url,
-        pool_size=size,
-        max_overflow=overflow,
-        pool_pre_ping=True,
-        pool_recycle=recycle,
-        pool_timeout=timeout,
-    )
+        raise ValueError("db url is empty")
+    # SQLite 不支持连接池参数，单独构造；PostgreSQL 使用带池配置
+    if url.startswith("sqlite"):
+        engine = create_engine(url, connect_args={"check_same_thread": False})
+    else:
+        engine = create_engine(
+            url,
+            pool_size=100,
+            max_overflow=100,
+            pool_pre_ping=True,
+            pool_recycle=1800,
+            pool_timeout=30,
+        )
     # 验证连接，带重试
     start_time = time.time()
     last_error = None
