@@ -1,0 +1,12 @@
+{
+    "enabled": ["mock", "manual", "boss"],
+    "sources": {
+        "boss": {
+            "headless": true,
+            "max_jobs": 30,
+            "max_pages": 3,
+            "page_delay": 3.0,
+            "note": "需要在环境变量配置 BOSS_COOKIE / ZHIPIN_COOKIE（或 *_COOKIE_FILE 指向导出文件）后才会真正检索；未配置时自动跳过并提示，不影响 mock/manual。"
+        }
+    }
+}

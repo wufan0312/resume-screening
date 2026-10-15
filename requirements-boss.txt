@@ -1,0 +1,3 @@
+# BOSS直聘 / 浏览器类数据源（Phase 2）运行所需依赖
+# 安装：pip install -r requirements-boss.txt && playwright install chromium
+playwright>=1.40
